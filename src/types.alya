@@ -88,7 +88,7 @@ end
 ## The `FieldDef`, or null.
 pub function find_field(model: ModelDef, name: string)
     for f in model.fields
-        if f.name == name
+        if field_name(f) == name
             return f
         end
     end
@@ -109,4 +109,33 @@ pub function pk_field(model: ModelDef)
         end
     end
     return null
+end
+
+## Reads a field's column name through a statically-typed boundary.
+##
+## Untyped `.name` reads are ambiguous across packages (`Driver`,
+## `FieldDef`); this helper pins the `FieldDef` layout.
+##
+## ### Parameters
+## - `f`: Target `FieldDef`.
+##
+## ### Returns
+## The column name string.
+pub function field_name(f: FieldDef) -> string
+    return f.name
+end
+
+## Reads a field's column kind through a statically-typed boundary.
+##
+## Untyped `.kind` reads are ambiguous across packages (`DbParam`,
+## `Param`, `FieldDef` disagree on the index); this helper pins the
+## `FieldDef` layout.
+##
+## ### Parameters
+## - `f`: Target `FieldDef`.
+##
+## ### Returns
+## The column kind integer.
+pub function field_kind(f: FieldDef) -> int
+    return f.kind
 end

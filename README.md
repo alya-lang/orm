@@ -11,45 +11,33 @@ Lightweight object-relational mapping for Alya: schema definitions, query builde
 
 ## 🌟 Features
 
-- ⚡ **Lightweight & High Performance**: Minimal memory overhead, zero runtime bloat, and fast native execution
-- 🧩 **Modular Architecture**: Layered multi-module design featuring a clean public facade (`src/lib.alya`), rich data models (`src/types.alya`), and encapsulated core formatters (`src/core/formatter.alya`)
-- 🔒 **Public/Private Visibility (`pub`)**: Fine-grained export control with `pub` for public functions, structs, and enums, keeping internal helper functions private and encapsulated
-- 🎭 **Structural Duck Typing & Interfaces**: Dynamic interface dispatch (`Summarizable`, `Describable`) without brittle inheritance hierarchies
-- 📦 **Rich Domain Models & Enums**: Idiomatic `enum` types (`OrmStatus`, `OrmPriority`, `OrmStyle`) and typed data containers (`OrmConfig`, `OrmResult`, `OrmStats`)
-- 🎯 **Advanced Pattern Matching**: Clean branching with `when` expressions, range matching, and condition guards
-- 🛡️ **Defensive Result Pattern**: Structured error handling and outcome encapsulation with `ok_result` and `error_result`
-- 🧪 **Enterprise Test & Benchmark Suite**: 100% test coverage with standard assertions (`std/test`) and micro-benchmarking (`std/test` bench runner)
-- 🚩 **Feature-Gated API Slices**: Optional capability slices via `[features]` in `alya.toml` (`default = ["extras"]`) and `@cfg(feature = "extras")` gating with a `@cfg(not(feature = "extras"))` fallback stub (see `src/core/extras.alya`)
+- 📋 **Descriptor-Driven Models**: Declare columns once (`define_model` + `field`), and every operation derives from the descriptor — no stringly SQL at call sites.
+- 🔒 **Injection-Proof by Construction**: Column names validate against the model, values bind as `?` parameters; hostile input throws instead of reaching SQL.
+- 🎯 **Strict Value Contracts**: Values must arrive in column type (ints, strings, byte arrays, null; floats as round-trip text). Mistyped or missing values throw a `DbError` naming the column — never silent corruption.
+- 🔄 **Full CRUD**: `create_table` / `drop_table`, `insert`, `find_by_id` / `find_all` / `where`, `count`, `update`, `delete_where` / `delete_by_id`, plus transactions through the `db` facade.
+- 🧩 **Thin Layer over `db`**: No drivers, no C code, no new dependencies beyond `db` — adapters, pooling, and engines stay where they belong.
+- 🧪 **Real Roundtrip Suite**: Every claim is verified against in-memory SQLite through `db` (including injection, rollback, and error-shape cases).
 
 ---
 
 ## 📁 Project Architecture
 
-```
+```text
 orm/
-├── .alyalint               # Linter configuration (rules, exclusions, severity overrides)
-├── .editorconfig           # Uniform formatting rules across IDEs and editors
-├── .gitignore              # Ecosystem standard ignore filters
-├── .vscode/                # VS Code workspace settings, DAP launch configurations & tasks
-├── alya.toml               # Package manifest with dependencies, [features] and optional [build]
-├── c/                      # (Optional) Native C sources for zero-dependency FFI packages
+├── alya.toml               # Package manifest (depends on db v0.2.0)
 ├── src/
-│   ├── lib.alya            # Public API facade (pub exports, re-exports & pipeline runners)
-│   ├── types.alya          # Data models, pub enums, pub structs, and struct methods
-│   ├── ffi.alya            # (Optional) Native extern "C" declarations
-│   └── core/               # Subdirectory module hierarchy
-│       ├── formatter.alya  # Domain formatting routines, salutation builders & pattern matchers
-│       └── extras.alya     # Feature-gated (`extras`) optional API slice with `@cfg` gating
+│   ├── lib.alya            # Public API facade (schema, writes, reads + ModelDef methods)
+│   └── types.alya          # FieldDef, ModelDef, KIND_* constants, find helpers
 ├── examples/
-│   └── demo.alya           # Comprehensive runnable walkthrough of all package capabilities
+│   └── demo.alya           # Runnable walkthrough (model → CRUD → struct fill → strictness)
 ├── tests/
-│   └── test_basic.alya     # Automated test suite with 100% feature coverage
+│   └── test_basic.alya     # Contract suite over db + sqlite adapter (in-memory)
 └── benches/
-    └── bench_basic.alya    # Micro-benchmarks measuring performance and throughput
+    └── bench_basic.alya    # DDL generation + row-map micro-benchmarks
 ```
 
 > [!NOTE]
-> **Visibility & Modularity:** Symbols annotated with `pub` (`pub function`, `pub struct`, `pub enum`, `pub interface`) are exported to external consumers and re-exporting modules. Symbols without `pub` remain strictly internal to their declaring module, preventing symbol collisions and implementation leakage.
+> **Visibility & Modularity:** Symbols annotated with `pub` are exported to external consumers. Symbols without `pub` remain strictly internal to their declaring module.
 
 ---
 
@@ -69,42 +57,35 @@ alya add orm --git https://github.com/alya-lang/orm --branch main
 alya install
 ```
 
-### Package Features
-
-| Feature | Default | Description |
-|:---|:---:|:---|
-| `extras` | ✅ | Optional capability slice (`extra_greeting` in `src/core/extras.alya`, with a fallback stub when disabled). |
-
-```bash
-# Full build (default)
-alya install
-alya test
-
-# Slim build (core only)
-alya install --no-default-features
-alya test --no-default-features
-```
-
 ---
 
 ## 🚀 Quick Start
 
 ```alya
+import "db" as db
 import "orm" as pkg
 
 function main()
-    # 1. Basic facade call with default parameter
-    let greeting = pkg::hello()
-    say f"Greeting:  {greeting}"
+    # 1. Define the model once (kinds mirror db ParamKind values)
+    let users = pkg::define_model("users", [pkg::field("id", pkg::KIND_INT, 1), pkg::field("name", pkg::KIND_TEXT), pkg::field("score", pkg::KIND_FLOAT)])
 
-    # 2. Struct configuration with priority, style, and methods
-    let cfg = pkg::new_config("Community", 5, pkg::OrmPriority.High, pkg::OrmStyle.Formal)
-    say f"Summary:   {cfg.summary()}"
-    say f"Formatted: {pkg::core_format_custom(cfg)}"
+    # 2. Open through db and create the table
+    let conn = db::open(db::sqlite_driver(), ":memory:")
+    pkg::create_table(conn, users)
 
-    # 3. Processing pipeline returning Result model
-    let res = pkg::process("Analytics", 3, pkg::OrmPriority.Critical)
-    say f"Outcome:   {res.message}"
+    # 3. Insert (floats as round-trip text via str() at this proven site)
+    let row = map()
+    row["id"] = 1
+    row["name"] = "Alice"
+    row["score"] = str(95.5)
+    pkg::insert(conn, users, row)
+
+    # 4. Read back
+    let found = pkg::find_by_id(conn, users, 1)
+    say f"User #1: {found["name"]} -> {found["score"]}"
+
+    # 5. Close
+    db::close(conn)
 end
 
 main()
@@ -114,47 +95,46 @@ main()
 
 ## 📖 API Reference
 
-| Symbol | Visibility | Description |
+### Schema
+
+| Symbol | Kind | Description |
 |---|---|---|
-| `hello(name = "World")` | `pub function` | Returns a formatted greeting string. Defaults to `"World"` if null or empty. |
-| `new_config(name, count, priority, style)` | `pub function` | Factory constructing a `OrmConfig` with sensible defaults. |
-| `make_config(name, count, priority, style, enabled, tags)` | `pub function` | Full constructor for `OrmConfig`. |
-| `process(label, count, priority)` | `pub function` | Runs processing pipeline, returning an `ok_result` `OrmResult`. |
-| `process_batch(labels)` | `pub function` | Formats an array of labels in batch, returning an array of strings. |
-| `ok_result(value, message)` | `pub function` | Constructs a successful `OrmResult` container (`status = 0`). |
-| `error_result(message, errors)` | `pub function` | Constructs a failed `OrmResult` container (`status = 1`). |
-| `make_stats(total, passed, failed, skipped)` | `pub function` | Constructs a `OrmStats` metrics record. |
-| `format_summary(cfg)` | `pub function` | Formats summary of a config instance (satisfies `Summarizable`). |
-| `format_description(cfg)` | `pub function` | Formats description of a config instance (satisfies `Describable`). |
-| `format_config(config)` | `pub function` | Multi-field formatter producing descriptive overview of a `OrmConfig`. |
-| `format_result(result)` | `pub function` | Formats a `OrmResult` into `[OK]` or `[ERROR]` status line. |
-| `format_stats(stats)` | `pub function` | Formats total checked items and success rate percentage. |
-| `clamp(n, min_val, max_val)` | `pub function` | Clamps an integer value to the closed range `[min_val, max_val]`. |
-| `pluralize(n, singular, plural)` | `pub function` | Pattern-matches count to return singular or plural noun form. |
-| `repeat_string(label, count)` | `pub function` | Repeats a string into an array of `count` items. |
-| `extra_greeting(name = "World")` | `pub function` (`extras` feature, default-on) | Enthusiastic greeting slice gated by `@cfg(feature = "extras")`; stub throws a descriptive error when the feature is off. |
-| `Summarizable` | `pub interface` | Structural contract requiring `summary(self) -> string`. |
-| `Describable` | `pub interface` | Structural contract requiring `describe(self) -> string` and `is_valid(self) -> int`. |
-| `OrmStatus` | `pub enum` | Lifecycle status codes (`Pending = 0`, `Active = 1`, `Archived = 2`, `Error = 3`). |
-| `OrmPriority` | `pub enum` | Priority tiers (`Low = 0`, `Normal = 1`, `High = 2`, `Critical = 3`). |
-| `OrmStyle` | `pub enum` | Presentation styles (`Standard = 0`, `Formal = 1`, `Casual = 2`). |
-| `OrmConfig` | `pub struct` | Primary configuration model (`name`, `count`, `priority`, `style`, `enabled`, `tags`). |
-| `OrmConfig.summary()` | `pub method` | Single-line formatted summary (satisfies `Summarizable`). |
-| `OrmConfig.describe()` | `pub method` | Detailed multi-field description (satisfies `Describable`). |
-| `OrmConfig.is_valid()` | `pub method` | Validation guard returning 1 if valid, 0 otherwise. |
-| `OrmConfig.is_enabled()` | `pub method` | Returns 1 if active, 0 if disabled. |
-| `OrmConfig.with_name(new_name)` | `pub method` | Immutable copy with updated name. |
-| `OrmConfig.with_priority(new_prio)` | `pub method` | Immutable copy with updated priority tier. |
-| `OrmResult` | `pub struct` | Operation outcome model (`value`, `status`, `message`, `errors`). |
-| `OrmResult.is_ok()` | `pub method` | Returns 1 if successful (`status == 0`), 0 otherwise. |
-| `OrmResult.is_error()` | `pub method` | Returns 1 if error (`status != 0`), 0 otherwise. |
-| `OrmResult.unwrap_or(fallback)` | `pub method` | Returns message on success, or fallback on error. |
-| `OrmStats` | `pub struct` | Run statistics model (`total`, `passed`, `failed`, `skipped`). |
-| `OrmStats.total_checked()` | `pub method` | Sum of passed and failed items count. |
-| `OrmStats.success_rate()` | `pub method` | Computed percentage string (e.g. `"95%"`). |
+| `KIND_INT` / `KIND_FLOAT` / `KIND_TEXT` / `KIND_BLOB` | `pub const` | Column kinds (`1`, `2`, `3`, `5`; mirror `db` values). |
+| `field(name, kind, pk)` | `pub function` | Validated column definition (`pk = 1` requires `KIND_INT`). |
+| `define_model(table, fields)` | `pub function` | Table model from ordered columns (non-empty). |
+| `find_field(model, name)` | `pub function` | Column lookup, or null when absent. |
+| `pk_field(model)` | `pub function` | Primary-key column, or null when none. |
+| `field_name(f)` / `field_kind(f)` | `pub function` | Layout-pinned field readers. |
+| `FieldDef` | `pub struct` | Column model (`name`, `kind`, `pk`). |
+| `ModelDef` | `pub struct` | Table model (`table`, `fields`). |
+
+### Writes
+
+| Function | Arguments | Returns | Description |
+|---|---|---|---|
+| `create_table(conn, model)` | `conn, ModelDef` | `i32` | Creates the table from `create_table_sql`. |
+| `create_table_sql(model)` | `ModelDef` | `str` | Renders DDL without executing (logging/migrations). |
+| `drop_table(conn, model)` | `conn, ModelDef` | `i32` | Drops the table. |
+| `insert(conn, model, values)` | `conn, ModelDef, Map` | `i32` | Inserts one row; every column needs a strictly-typed value. |
+| `update(conn, model, values, cond)` | `conn, ModelDef, Map, Map?` | `i32` | Updates matching rows (`cond` null = all rows). |
+| `delete_where(conn, model, cond)` | `conn, ModelDef, Map` | `i32` | Deletes matching rows (refuses empty filters). |
+| `delete_by_id(conn, model, id)` | `conn, ModelDef, value` | `i32` | Deletes one row by primary key. |
+
+### Reads
+
+| Function | Arguments | Returns | Description |
+|---|---|---|---|
+| `find_all(conn, model, order, direction, limit)` | `conn, ModelDef, ...` | `Array` | All rows with optional ordering/limit. |
+| `where(conn, model, cond, order, direction, limit)` | `conn, ModelDef, Map?, ...` | `Array` | Filtered rows (unknown keys throw). |
+| `find_by_id(conn, model, id)` | `conn, ModelDef, value` | `Map?` | One row by pk, or null when missing. |
+| `count(conn, model, cond)` | `conn, ModelDef, Map?` | `i32` | Matching row count. |
+
+### ModelDef Methods
+
+`create_table`, `drop_table`, `insert`, `update`, `delete_where`, `find_all`, `where`, `count` are also available as `ModelDef` methods with `self` first (e.g. `users.insert(conn, row)`).
 
 > [!TIP]
-> **Internal Helpers & Documentation:** Public symbols are documented with `##` Markdown docstrings, enabling automatic API documentation generation via `alya doc`. Private functions such as `build_salutation` and `build_priority_label` in `src/core/formatter.alya` are not annotated with `pub` and remain encapsulated within their respective modules.
+> **Internal Helpers & Documentation:** Public symbols carry `##` Markdown docstrings for `alya doc`. Value maps should be built with index assignment (`m["k"] = v`), never as mixed literals (heterogeneous literals demote value types at check time).
 
 ---
 
@@ -164,13 +144,6 @@ Run the automated test suite using `alya test`:
 
 ```bash
 alya test
-```
-
-Exercise feature selection (the `extras` slice is default-on):
-
-```bash
-alya test --features extras
-alya test --no-default-features
 ```
 
 Generate static API documentation:
@@ -205,15 +178,6 @@ alya lint . --check
 
 ---
 
-### 💻 Developer Tooling & VS Code Integration
-
-This package comes preconfigured with recommended workspace settings and tasks for **Visual Studio Code**:
-- **LSP & Formatting**: Auto-formatting on save and real-time Language Server diagnostics via `alya-lang.vscode-alya`.
-- **DAP Debugging**: Launch configurations in `.vscode/launch.json` ready for interactive step-debugging via `F5`.
-- **Predefined Tasks**: Press `Ctrl+Shift+B` or run tasks (`Test`, `Lint`, `Format`, `Build Docs`) directly from the Command Palette.
-
----
-
 ## 🤝 Contributing
 
 Contributions are welcome! Please follow these steps:
@@ -227,6 +191,7 @@ Contributions are welcome! Please follow these steps:
 4. Verify tests and formatting before opening a PR:
    ```bash
    alya test
+   alya fmt . --check
    ```
 5. Commit your changes (`git commit -m "feat: add feature"`) and open a Pull Request
 

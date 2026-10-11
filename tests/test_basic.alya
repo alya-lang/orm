@@ -44,7 +44,7 @@ function main()
     runner_assert_eq(r, len(users.fields), 5, "model has 5 fields")
     runner_assert_true(r, pkg::find_field(users, "name") is not null, "find_field locates name")
     runner_assert_true(r, pkg::find_field(users, "nope") is null, "find_field misses unknown")
-    runner_assert_str_eq(r, pkg::pk_field(users).name, "id", "pk_field is id")
+    runner_assert_str_eq(r, pkg::field_name(pkg::pk_field(users)), "id", "pk_field is id")
     runner_assert_true(r, pkg::pk_field(make_counters_model()) is null, "pkless model has no pk")
 
     let bad_kind = 0
@@ -83,7 +83,13 @@ function main()
     runner_assert_eq(r, pkg::create_table(conn, users), 0, "create_table succeeds")
 
     let big = 1099511627776
-    runner_assert_eq(r, pkg::insert(conn, users, user_row(big, "O'Brien", "19.99", [9, 8, 7], null)), 1, "insert affects 1 row")
+    let bigrow_in = map()
+    bigrow_in["id"] = big
+    bigrow_in["name"] = "O'Brien"
+    bigrow_in["score"] = "19.99"
+    bigrow_in["payload"] = [9, 8, 7]
+    bigrow_in["note"] = null
+    runner_assert_eq(r, pkg::insert(conn, users, bigrow_in), 1, "insert affects 1 row")
 
     let got = pkg::find_by_id(conn, users, big)
     runner_assert_true(r, got is not null, "find_by_id returns row")

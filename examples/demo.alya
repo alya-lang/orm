@@ -15,6 +15,15 @@ pub struct User
     note
 end
 
+function user_row(id: int, name: string, score: string, note)
+    let m = map()
+    m["id"] = id
+    m["name"] = name
+    m["score"] = score
+    m["note"] = note
+    return m
+end
+
 function main()
     say "==========================================="
     say "            ORM PACKAGE SHOWCASE           "
@@ -31,19 +40,8 @@ function main()
     say "2. Table created on :memory:"
 
     # 3. Insert rows (floats as round-trip text via str() at this proven site)
-    let score_alice = 95.5
-    let row_alice = map()
-    row_alice["id"] = 1
-    row_alice["name"] = "Alice"
-    row_alice["score"] = str(score_alice)
-    row_alice["note"] = null
-    pkg::insert(conn, users, row_alice)
-    let row_bob = map()
-    row_bob["id"] = 2
-    row_bob["name"] = "Bob"
-    row_bob["score"] = str(88.0)
-    row_bob["note"] = "second"
-    pkg::insert(conn, users, row_bob)
+    pkg::insert(conn, users, user_row(1, "Alice", str(95.5), null))
+    pkg::insert(conn, users, user_row(2, "Bob", str(88.0), "second"))
     say "3. Inserted 2 rows"
 
     # 4. Read back and fill a struct explicitly (recommended pattern)
@@ -52,15 +50,17 @@ function main()
     say "4. Struct fill: #" + str(alice.id) + " " + alice.name + " -> " + alice.score
 
     # 5. Filtered query + count
-    let bobs = pkg::where(conn, users, null, "id", "DESC", 1)
-    say "5. Latest row id: " + str(bobs[0]["id"]) + " (total: " + str(pkg::count(conn, users, null)) + ")"
+    let latest = pkg::where(conn, users, null, "id", "DESC", 1)
+    say "5. Latest row id: " + str(latest[0]["id"]) + " (total: " + str(pkg::count(conn, users, null)) + ")"
 
     # 6. Update, delete, transactions
-    pkg::update(conn, users, row_bob, null)
+    let upd = map()
+    upd["name"] = "Bobby"
+    pkg::update(conn, users, upd, null)
     pkg::delete_by_id(conn, users, 2)
     say "6. After update+delete, total: " + str(pkg::count(conn, users, null))
     db::begin(conn)
-    pkg::insert(conn, users, row_bob)
+    pkg::insert(conn, users, user_row(3, "Carol", str(70.0), null))
     db::rollback(conn)
     say "   After rollback, total: " + str(pkg::count(conn, users, null))
 
@@ -71,7 +71,7 @@ function main()
         say "7. Hostile column rejected, code " + str(err.code)
     end
 
-    users.drop_table_m(conn)
+    pkg::drop_table(conn, users)
     db::close(conn)
     say "==========================================="
 end

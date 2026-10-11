@@ -1,0 +1,24 @@
+import "db" as db
+import "./src/lib.alya" as pkg
+
+function main()
+    let driver = db::sqlite_driver()
+    let conn = db::open(driver, ":memory:")
+    let m = pkg::define_model("t", [pkg::field("id", pkg::KIND_INT, 1), pkg::field("name", pkg::KIND_TEXT), pkg::field("score", pkg::KIND_FLOAT), pkg::field("payload", pkg::KIND_BLOB), pkg::field("note", pkg::KIND_TEXT)])
+    pkg::create_table(conn, m)
+    let v = map()
+    v["id"] = 1099511627776
+    v["name"] = "Al"
+    v["score"] = "9.5"
+    v["payload"] = [9]
+    v["note"] = null
+    try
+        pkg::insert(conn, m, v)
+        say "WITH-TEST-IMPORT ok"
+    catch err
+        say "WITH-TEST-IMPORT THREW"
+    end
+    db::close(conn)
+end
+
+main()

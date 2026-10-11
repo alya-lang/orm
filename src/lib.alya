@@ -45,13 +45,12 @@ end
 
 # Converts one value to a `db` Param using the DECLARED column kind only.
 # Usable checks on rebound dynamics are `is null` (zero-test) and
-# `is string` (heap-range); `is int` defaults true, `is array` misses, and
-# `len()` dereferences heap-range ints instead of answering, so none of
-# the three is consulted anywhere here. Consequence, documented for
-# callers: ints and int-likes go to Int/Float columns, strings to
-# Text/Float columns, anything to Blob columns, null anywhere; anything
-# else throws. Passing a float or a container where an int belongs is
-# caller error and best-effort detected.
+# `is string` (heap-range); `is int` defaults true, `is array` misses,
+# `len()` dereferences heap-range ints, and `is not` miscompiles in
+# functions, so none of the four is consulted anywhere here. Integer `0`
+# shares the zero word with null and reads as null: callers must avoid 0
+# as a significant value (auto-rowid fills it); float `0.0` stays
+# conflated with null (pass it as text, like every float).
 function param_for(field: FieldDef, val)
     let kind = field.kind
     let col = field.name
@@ -199,12 +198,12 @@ pub function insert(conn, model, values) -> int
     let holders = []
     let params = []
     for f in model.fields
-        if f.name in values
-            cols.push(f.name)
+        if field_name(f) in values
+            cols.push(field_name(f))
             holders.push("?")
-            params.push(param_for(f, values[f.name]))
+            params.push(param_for(f, values[field_name(f)]))
         else
-            throw db::db_error(2, f"orm: missing value for column '{f.name}'")
+            throw db::db_error(2, f"orm: missing value for column '{field_name(f)}'")
         end
     end
     let sql = "INSERT INTO " + model.table + " (" + join_comma(cols) + ") VALUES (" + join_comma(holders) + ");"
@@ -283,7 +282,7 @@ pub function delete_by_id(conn, model: ModelDef, id) -> int
         throw db::db_error(2, f"orm: model '{model.table}' has no primary key")
     end
     let cond = map()
-    cond[pk.name] = id
+    cond[field_name(pk)] = id
     return delete_where(conn, model, cond)
 end
 
@@ -355,7 +354,7 @@ pub function find_by_id(conn, model: ModelDef, id)
         throw db::db_error(2, f"orm: model '{model.table}' has no primary key")
     end
     let cond = map()
-    cond[pk.name] = id
+    cond[field_name(pk)] = id
     let rows = where(conn, model, cond)
     if len(rows) == 0
         return null
