@@ -1,197 +1,484 @@
 ## orm Library Facade
 ##
 ## Part of the Alya Language package ecosystem (https://github.com/alya-lang).
-## Serves as the primary public entry point and facade for the orm package,
-## exposing models, enums, constructors, interfaces, and processing workflows.
+## Descriptor-driven object-relational mapping over `db`: models declare
+## columns once (`define_model`), and every operation builds injection-safe
+## parameterized SQL from the descriptor. Values travel strictly typed —
+## conversions belong at the caller's proven site, never in here — so this
+## package runs zero `int()`/`float()` conversions on dynamics. Float
+## columns take round-trip text (e.g. straight from a previous query row).
 
+import "db" as db
 import "./types.alya"
-import "./core/formatter.alya"
-@cfg(feature = "extras")
-import "./core/extras.alya"
 
 # ───────────────────────────────────────────────────────────────
-# Primary Facade APIs
+# Internal builders (no `pub`: callers use the facade below)
 # ───────────────────────────────────────────────────────────────
 
-## Formats and returns a greeting message for the specified recipient.
-##
-## Defaults to `"World"` if the name parameter is omitted, empty, or null.
-##
-## ### Parameters
-## - `name`: The name of the recipient to greet. Defaults to `"World"`.
-##
-## ### Returns
-## A formatted greeting string, e.g. `"Hello, World!"`.
-##
-## ### Examples
-## ```alya
-## let msg = hello("Alya")
-## say msg # "Hello, Alya!"
-## ```
-pub function hello(name = "World") -> string
-    let clean = sanitize_name(name)
-    return core_format_greeting(clean)
-end
-
-## Constructs a new configuration model instance with specified or default values.
-##
-## ### Parameters
-## - `name`: Target recipient or entity name. Defaults to `"World"`.
-## - `count`: Number of iterations or repetition limit. Defaults to `1`.
-## - `priority`: Operational priority level (`OrmPriority`). Defaults to `OrmPriority.Normal`.
-## - `style`: Formality style variant code (`OrmStyle`). Defaults to `OrmStyle.Standard`.
-##
-## ### Returns
-## A newly initialized `OrmConfig` instance.
-##
-## ### Examples
-## ```alya
-## let cfg = new_config("Community", 5, OrmPriority.High, OrmStyle.Formal)
-## ```
-pub function new_config(name = "World", count: int = 1, priority: int = OrmPriority.Normal, style: int = OrmStyle.Standard) -> OrmConfig
-    return make_config(name, count, priority, style)
-end
-
-## Processes a configuration label through the formatting pipeline, returning a `OrmResult`.
-##
-## ### Parameters
-## - `label`: The target entity label string. Defaults to `"World"`.
-## - `count`: Counter or repetition count. Defaults to `1`.
-## - `priority`: Priority tier. Defaults to `OrmPriority.Normal`.
-##
-## ### Returns
-## A successful `OrmResult` containing the formatted summary string.
-##
-## ### Examples
-## ```alya
-## let res = process("Alice", 3, OrmPriority.High)
-## say res.message # "OK"
-## ```
-pub function process(label = "World", count: int = 1, priority: int = OrmPriority.Normal) -> OrmResult
-    let cfg = make_config(label, count, priority)
-    let formatted = format_config(cfg)
-    return ok_result(formatted, "OK")
-end
-
-## Processes an array of labels in batch, returning an array of formatted strings.
-##
-## Handles null input safely by returning an empty array.
-##
-## ### Parameters
-## - `labels`: Array of label strings to process (or null).
-##
-## ### Returns
-## An array of formatted result strings.
-##
-## ### Examples
-## ```alya
-## let results = process_batch(["Alpha", "Beta"])
-## ```
-pub function process_batch(labels) -> array
-    if labels is null
-        return []
+function join_comma(parts: array) -> string
+    let out = ""
+    let i = 0
+    while i < len(parts)
+        if i > 0
+            out += ", "
+        end
+        out += parts[i]
+        i += 1
     end
-
-    let configs = []
-    for lbl in labels
-        configs.push(make_config(lbl, 1, OrmPriority.Normal))
-    end
-    return format_batch(configs)
+    return out
 end
 
-## Formats and returns the summary representation of a configuration.
-##
-## Demonstrates struct method dispatch and interface satisfaction (`Summarizable`).
-##
-## ### Parameters
-## - `cfg`: A `OrmConfig` instance.
-##
-## ### Returns
-## The string returned by the config's `summary()` method.
-##
-## ### Examples
-## ```alya
-## let cfg = new_config("Community", 3)
-## say format_summary(cfg)
-## ```
-pub function format_summary(cfg: OrmConfig) -> string
-    return cfg.summary()
-end
-
-## Formats and returns the description of a configuration.
-##
-## Demonstrates struct method dispatch and interface satisfaction (`Describable`).
-##
-## ### Parameters
-## - `cfg`: A `OrmConfig` instance.
-##
-## ### Returns
-## The string returned by `describe()`.
-##
-## ### Examples
-## ```alya
-## let cfg = new_config("Project", 1)
-## say format_description(cfg)
-## ```
-pub function format_description(cfg: OrmConfig) -> string
-    return cfg.describe()
-end
-
-## Clamps an integer to the closed interval `[min_val, max_val]`.
-##
-## ### Parameters
-## - `n`: Value to clamp.
-## - `min_val`: Lower bound.
-## - `max_val`: Upper bound.
-##
-## ### Returns
-## Clamped integer within the specified range.
-pub function clamp(n: int, min_val: int, max_val: int) -> int
-    return clamp_count(n, min_val, max_val)
-end
-
-## Returns singular or plural form based on item count.
-##
-## ### Parameters
-## - `n`: The item count.
-## - `singular`: Word form for count == 1.
-## - `plural`: Word form for counts != 1.
-##
-## ### Returns
-## The selected string based on `n`.
-pub function pluralize(n: int, singular: string, plural: string) -> string
-    return when n
-        is 1 => singular
-        else => plural
+function column_sql(f: FieldDef) -> string
+    let kind = f.kind
+    when kind
+        is 1 then
+            if f.pk == true
+                return f.name + " INTEGER PRIMARY KEY"
+            end
+            return f.name + " INTEGER"
+        is 2 then return f.name + " REAL"
+        is 3 then return f.name + " TEXT"
+        is 5 then return f.name + " BLOB"
+        else throw db::db_error(2, f"orm: unknown kind for column '{f.name}'")
     end
 end
 
-## Returns an array repeating the given string `count` times.
+# Converts one value to a `db` Param using the DECLARED column kind only.
+# Usable checks on rebound dynamics are `is null` (zero-test) and
+# `is string` (heap-range); `is int` defaults true, `is array` misses, and
+# `len()` dereferences heap-range ints instead of answering, so none of
+# the three is consulted anywhere here. Consequence, documented for
+# callers: ints and int-likes go to Int/Float columns, strings to
+# Text/Float columns, anything to Blob columns, null anywhere; anything
+# else throws. Passing a float or a container where an int belongs is
+# caller error and best-effort detected.
+function param_for(field: FieldDef, val)
+    let kind = field.kind
+    let col = field.name
+    if val is null
+        return db::param_null()
+    end
+    if val is string
+        if kind == 2 or kind == 3
+            let s: string = val
+            return db::param_text(s)
+        end
+        throw db::db_error(2, f"orm: text value for non-text column '{col}'")
+    end
+    if kind == 5
+        return db::param_blob(val)
+    end
+    if kind == 1 or kind == 2
+        return db::param_int(val)
+    end
+    throw db::db_error(2, f"orm: column '{col}' needs int, text, blob, or null")
+end
+
+function model_param(model: ModelDef, col: string, val)
+    let f = find_field(model, col)
+    if f is null
+        throw db::db_error(2, f"orm: unknown column '{col}'")
+    end
+    return param_for(f, val)
+end
+
+# Internal pair type: where_parts returns one struct instead of a
+# heterogeneous array literal (mixed literals demote element types).
+struct WhereClause
+    sql: string
+    params: array
+end
+
+# Builds " WHERE k = ? AND ..." plus the param array. Null `cond` means
+# no filter. Unknown keys throw (injection-proof by construction).
+function where_parts(model: ModelDef, cond)
+    let sql = ""
+    let params = []
+    if cond is null
+        return WhereClause { sql: sql, params: params }
+    end
+    let ks = keys(cond)
+    let first = true
+    for k in ks
+        let f = find_field(model, k)
+        if f is null
+            throw db::db_error(2, f"orm: unknown column '{k}'")
+        end
+        if first
+            sql += " WHERE "
+            first = false
+        else
+            sql += " AND "
+        end
+        sql += k + " = ?"
+        params.push(param_for(f, cond[k]))
+    end
+    return WhereClause { sql: sql, params: params }
+end
+
+function order_clause(model: ModelDef, order: string, direction: string) -> string
+    if order == ""
+        return ""
+    end
+    if find_field(model, order) is null
+        throw db::db_error(2, f"orm: unknown order column '{order}'")
+    end
+    if direction != "ASC" and direction != "DESC"
+        throw db::db_error(2, f"orm: order direction must be ASC or DESC")
+    end
+    return " ORDER BY " + order + " " + direction
+end
+
+# ───────────────────────────────────────────────────────────────
+# Schema
+# ───────────────────────────────────────────────────────────────
+
+## Renders the CREATE TABLE statement for a model (no execution).
 ##
 ## ### Parameters
-## - `label`: String to repeat.
-## - `count`: Number of occurrences.
+## - `model`: Target `ModelDef`.
 ##
 ## ### Returns
-## Array of repeated strings.
-pub function repeat_string(label: string, count: int) -> array
-    return repeat_label(label, count)
+## The DDL string (handy for logging and migrations).
+pub function create_table_sql(model: ModelDef) -> string
+    let parts = []
+    for f in model.fields
+        parts.push(column_sql(f))
+    end
+    return "CREATE TABLE " + model.table + " (" + join_comma(parts) + ");"
 end
 
-# ───────────────────────────────────────────────────────────────
-# Feature-Gated API Fallback Stubs
-# ───────────────────────────────────────────────────────────────
-
-# The slim-view stub below keeps the public API surface stable when the
-# `extras` feature is disabled, so callers get a clear descriptive error
-# instead of an undefined reference (param unused by design).
-# alya-lint: disable unused-param
-## Fallback stub for `extra_greeting` when the `extras` feature is disabled.
+## Creates the model's table.
 ##
-## Rebuild with default features (or `--features extras`) for the full
-## implementation in `src/core/extras.alya`.
-@cfg(not(feature = "extras"))
-pub function extra_greeting(name = "World") -> string
-    throw "extras feature is disabled (rebuild with default features or --features extras)"
+## ### Parameters
+## - `conn`: Target `db` connection (untyped: any driver handle).
+## - `model`: Target `ModelDef`.
+##
+## ### Returns
+## Affected row count integer.
+pub function create_table(conn, model: ModelDef) -> int
+    return db::execute(conn, create_table_sql(model), [])
 end
-# alya-lint: enable unused-param
+
+## Drops the model's table.
+##
+## ### Parameters
+## - `conn`: Target `db` connection.
+## - `model`: Target `ModelDef`.
+##
+## ### Returns
+## Affected row count integer.
+pub function drop_table(conn, model: ModelDef) -> int
+    return db::execute(conn, "DROP TABLE " + model.table + ";", [])
+end
+
+# ───────────────────────────────────────────────────────────────
+# Writes
+# ───────────────────────────────────────────────────────────────
+
+## Inserts one row; every model column needs a value (null allowed).
+##
+## Values must arrive in column type: ints for INTEGER, strings for TEXT,
+## round-trip text for REAL, byte arrays for BLOB, null anywhere. Missing
+## keys and mistyped values throw a `DbError` naming the column.
+##
+## ### Parameters
+## - `conn`: Target `db` connection.
+## - `model`: Target `ModelDef`.
+## - `values`: Map of column name to value.
+##
+## ### Returns
+## Affected row count integer (1 on success).
+##
+## ### Examples
+## ```alya
+## insert(conn, users, { "name": "Alice", "score": "95.5" })
+## ```
+pub function insert(conn, model, values) -> int
+    let cols = []
+    let holders = []
+    let params = []
+    for f in model.fields
+        if f.name in values
+            cols.push(f.name)
+            holders.push("?")
+            params.push(param_for(f, values[f.name]))
+        else
+            throw db::db_error(2, f"orm: missing value for column '{f.name}'")
+        end
+    end
+    let sql = "INSERT INTO " + model.table + " (" + join_comma(cols) + ") VALUES (" + join_comma(holders) + ");"
+    return db::execute(conn, sql, params)
+end
+
+## Updates rows matching `cond` (null `cond` updates every row).
+##
+## ### Parameters
+## - `conn`: Target `db` connection.
+## - `model`: Target `ModelDef`.
+## - `values`: Map of column name to new value (at least one).
+## - `cond`: Filter map, or null for all rows.
+##
+## ### Returns
+## Affected row count integer.
+pub function update(conn, model: ModelDef, values, cond = null) -> int
+    let sets = []
+    let params = []
+    let vks = keys(values)
+    for k in vks
+        let f = find_field(model, k)
+        if f is null
+            throw db::db_error(2, f"orm: unknown column '{k}'")
+        end
+        sets.push(k + " = ?")
+        params.push(param_for(f, values[k]))
+    end
+    if len(sets) == 0
+        throw db::db_error(2, "orm: update needs at least one column")
+    end
+    let parts = where_parts(model, cond)
+    let all_params = []
+    for p in params
+        all_params.push(p)
+    end
+    for p in parts.params
+        all_params.push(p)
+    end
+    let sql = "UPDATE " + model.table + " SET " + join_comma(sets) + parts.sql + ";"
+    return db::execute(conn, sql, all_params)
+end
+
+## Deletes rows matching `cond` (null refuses: use `drop_table` to clear).
+##
+## ### Parameters
+## - `conn`: Target `db` connection.
+## - `model`: Target `ModelDef`.
+## - `cond`: Filter map (must be non-empty).
+##
+## ### Returns
+## Affected row count integer.
+pub function delete_where(conn, model: ModelDef, cond) -> int
+    if cond is null
+        throw db::db_error(2, "orm: refusing unconditional delete (use drop_table to clear)")
+    end
+    let parts = where_parts(model, cond)
+    if parts.sql == ""
+        throw db::db_error(2, "orm: refusing unconditional delete (use drop_table to clear)")
+    end
+    return db::execute(conn, "DELETE FROM " + model.table + parts.sql + ";", parts.params)
+end
+
+## Deletes one row by primary key.
+##
+## ### Parameters
+## - `conn`: Target `db` connection.
+## - `model`: Target `ModelDef` (must declare a pk field).
+## - `id`: Primary key value.
+##
+## ### Returns
+## Affected row count integer.
+pub function delete_by_id(conn, model: ModelDef, id) -> int
+    let pk = pk_field(model)
+    if pk is null
+        throw db::db_error(2, f"orm: model '{model.table}' has no primary key")
+    end
+    let cond = map()
+    cond[pk.name] = id
+    return delete_where(conn, model, cond)
+end
+
+# ───────────────────────────────────────────────────────────────
+# Reads
+# ───────────────────────────────────────────────────────────────
+
+## Returns all rows, optionally ordered and limited.
+##
+## Rows are column-name maps (see `db::query`); use `db` row helpers or
+## explicit reads to fill your structs.
+##
+## ### Parameters
+## - `conn`: Target `db` connection.
+## - `model`: Target `ModelDef`.
+## - `order`: Order column name, or `""` for none.
+## - `direction`: `"ASC"` or `"DESC"` (validated).
+## - `limit`: Row cap integer (`-1` for none).
+##
+## ### Returns
+## Array of row maps (possibly empty).
+pub function find_all(conn, model: ModelDef, order: string = "", direction: string = "ASC", limit: int = -1) -> array
+    let sql = "SELECT * FROM " + model.table + order_clause(model, order, direction)
+    if limit != -1
+        if limit < 0
+            throw db::db_error(2, "orm: limit must be -1 or non-negative")
+        end
+        sql += " LIMIT " + str(limit)
+    end
+    return db::query(conn, sql + ";", [])
+end
+
+## Returns rows matching `cond` (null `cond` matches all rows).
+##
+## ### Parameters
+## - `conn`: Target `db` connection.
+## - `model`: Target `ModelDef`.
+## - `cond`: Filter map of column name to value, or null.
+## - `order`: Order column name, or `""` for none.
+## - `direction`: `"ASC"` or `"DESC"` (validated).
+## - `limit`: Row cap integer (`-1` for none).
+##
+## ### Returns
+## Array of row maps (possibly empty).
+pub function where(conn, model: ModelDef, cond = null, order: string = "", direction: string = "ASC", limit: int = -1) -> array
+    let parts = where_parts(model, cond)
+    let sql = "SELECT * FROM " + model.table + parts.sql + order_clause(model, order, direction)
+    if limit != -1
+        if limit < 0
+            throw db::db_error(2, "orm: limit must be -1 or non-negative")
+        end
+        sql += " LIMIT " + str(limit)
+    end
+    return db::query(conn, sql + ";", parts.params)
+end
+
+## Returns one row by primary key, or null when missing.
+##
+## ### Parameters
+## - `conn`: Target `db` connection.
+## - `model`: Target `ModelDef` (must declare a pk field).
+## - `id`: Primary key value.
+##
+## ### Returns
+## The row map, or null.
+pub function find_by_id(conn, model: ModelDef, id)
+    let pk = pk_field(model)
+    if pk is null
+        throw db::db_error(2, f"orm: model '{model.table}' has no primary key")
+    end
+    let cond = map()
+    cond[pk.name] = id
+    let rows = where(conn, model, cond)
+    if len(rows) == 0
+        return null
+    end
+    return rows[0]
+end
+
+## Counts rows matching `cond` (null `cond` counts all rows).
+##
+## ### Parameters
+## - `conn`: Target `db` connection.
+## - `model`: Target `ModelDef`.
+## - `cond`: Filter map, or null.
+##
+## ### Returns
+## Matching row count integer.
+pub function count(conn, model: ModelDef, cond = null) -> int
+    let parts = where_parts(model, cond)
+    return db::query_scalar(conn, "SELECT count(*) FROM " + model.table + parts.sql + ";", parts.params)
+end
+
+# ───────────────────────────────────────────────────────────────
+# ModelDef Struct Methods
+# ───────────────────────────────────────────────────────────────
+
+## Creates this model's table.
+##
+## ### Parameters
+## - `self`: The target `ModelDef`.
+## - `conn`: Target `db` connection.
+##
+## ### Returns
+## Affected row count integer.
+pub function ModelDef.create_table_m(self: ModelDef, conn) -> int
+    return create_table(conn, self)
+end
+
+## Drops this model's table.
+##
+## ### Parameters
+## - `self`: The target `ModelDef`.
+## - `conn`: Target `db` connection.
+##
+## ### Returns
+## Affected row count integer.
+pub function ModelDef.drop_table_m(self: ModelDef, conn) -> int
+    return drop_table(conn, self)
+end
+
+## Inserts one row into this model's table.
+##
+## ### Parameters
+## - `self`: The target `ModelDef`.
+## - `conn`: Target `db` connection.
+## - `values`: Map of column name to value.
+##
+## ### Returns
+## Affected row count integer.
+pub function ModelDef.insert_m(self: ModelDef, conn, values) -> int
+    return insert(conn, self, values)
+end
+
+## Updates rows of this model's table.
+##
+## ### Parameters
+## - `self`: The target `ModelDef`.
+## - `conn`: Target `db` connection.
+## - `values`: Map of column name to new value.
+## - `cond`: Filter map, or null for all rows.
+##
+## ### Returns
+## Affected row count integer.
+pub function ModelDef.update_m(self: ModelDef, conn, values, cond = null) -> int
+    return update(conn, self, values, cond)
+end
+
+## Deletes rows of this model's table matching `cond`.
+##
+## ### Parameters
+## - `self`: The target `ModelDef`.
+## - `conn`: Target `db` connection.
+## - `cond`: Filter map (must be non-empty).
+##
+## ### Returns
+## Affected row count integer.
+pub function ModelDef.delete_where_m(self: ModelDef, conn, cond) -> int
+    return delete_where(conn, self, cond)
+end
+
+## Returns all rows of this model's table.
+##
+## ### Parameters
+## - `self`: The target `ModelDef`.
+## - `conn`: Target `db` connection.
+##
+## ### Returns
+## Array of row maps (possibly empty).
+pub function ModelDef.find_all_m(self: ModelDef, conn) -> array
+    return find_all(conn, self)
+end
+
+## Returns rows of this model's table matching `cond`.
+##
+## ### Parameters
+## - `self`: The target `ModelDef`.
+## - `conn`: Target `db` connection.
+## - `cond`: Filter map, or null.
+##
+## ### Returns
+## Array of row maps (possibly empty).
+pub function ModelDef.where_m(self: ModelDef, conn, cond = null) -> array
+    return where(conn, self, cond)
+end
+
+## Counts rows of this model's table.
+##
+## ### Parameters
+## - `self`: The target `ModelDef`.
+## - `conn`: Target `db` connection.
+## - `cond`: Filter map, or null.
+##
+## ### Returns
+## Matching row count integer.
+pub function ModelDef.count_m(self: ModelDef, conn, cond = null) -> int
+    return count(conn, self, cond)
+end

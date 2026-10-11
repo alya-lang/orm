@@ -2,170 +2,242 @@
 ## Part of the Alya Language package ecosystem (https://github.com/alya-lang)
 
 import "std/test"
+import "db" as db
 import "../src/lib.alya" as pkg
 
+function make_users_model()
+    return pkg::define_model("users", [pkg::field("id", pkg::KIND_INT, 1), pkg::field("name", pkg::KIND_TEXT), pkg::field("score", pkg::KIND_FLOAT), pkg::field("payload", pkg::KIND_BLOB), pkg::field("note", pkg::KIND_TEXT)])
+end
+
+function make_counters_model()
+    return pkg::define_model("counters", [pkg::field("val", pkg::KIND_INT)])
+end
+
+# Value maps are built via indexassign, never as mixed literals: a
+# heterogeneous map literal demotes every value to one static type at
+# check time, corrupting downstream typed boundaries. Indexassigned maps
+# keep fully dynamic values (same rule as `sqlite` row decoding).
+function user_row(id: int, name: string, score: string, payload, note)
+    let m = map()
+    m["id"] = id
+    m["name"] = name
+    m["score"] = score
+    m["payload"] = payload
+    m["note"] = note
+    return m
+end
+
 function main()
-    test_suite(f"orm Test Suite")
+    test_suite("orm Test Suite")
     let r = runner_new()
 
     # ═══════════════════════════════════════════════════════════
-    # 1. Facade Greeting & Sanitization
+    # 1. Model definition & validation (pure, no driver)
     # ═══════════════════════════════════════════════════════════
-    let res = pkg::hello("Alya")
-    runner_assert_str_eq(r, res, "Hello, Alya!", "pkg::hello returns formatted greeting")
+    runner_assert_eq(r, pkg::KIND_INT, 1, "KIND_INT == 1")
+    runner_assert_eq(r, pkg::KIND_FLOAT, 2, "KIND_FLOAT == 2")
+    runner_assert_eq(r, pkg::KIND_TEXT, 3, "KIND_TEXT == 3")
+    runner_assert_eq(r, pkg::KIND_BLOB, 5, "KIND_BLOB == 5")
 
-    let default_res = pkg::hello()
-    runner_assert_str_eq(r, default_res, "Hello, World!", "pkg::hello() defaults to World")
+    let users = make_users_model()
+    runner_assert_str_eq(r, users.table, "users", "model table is users")
+    runner_assert_eq(r, len(users.fields), 5, "model has 5 fields")
+    runner_assert_true(r, pkg::find_field(users, "name") is not null, "find_field locates name")
+    runner_assert_true(r, pkg::find_field(users, "nope") is null, "find_field misses unknown")
+    runner_assert_str_eq(r, pkg::pk_field(users).name, "id", "pk_field is id")
+    runner_assert_true(r, pkg::pk_field(make_counters_model()) is null, "pkless model has no pk")
 
-    let null_res = pkg::hello(null)
-    runner_assert_str_eq(r, null_res, "Hello, World!", "pkg::hello(null) sanitizes null to World")
+    let bad_kind = 0
+    try
+        pkg::field("x", 4)
+    catch err
+        bad_kind = err.code
+    end
+    runner_assert_eq(r, bad_kind, 2, "unknown field kind throws code 2")
 
-    let empty_res = pkg::hello("")
-    runner_assert_str_eq(r, empty_res, "Hello, World!", "pkg::hello(\"\") sanitizes empty string to World")
+    let bad_pk = 0
+    try
+        pkg::field("x", pkg::KIND_TEXT, 1)
+    catch err
+        bad_pk = err.code
+    end
+    runner_assert_eq(r, bad_pk, 2, "text pk throws code 2")
 
-    # ═══════════════════════════════════════════════════════════
-    # 2. Enumeration Values
-    # ═══════════════════════════════════════════════════════════
-    runner_assert_eq(r, pkg::OrmStatus.Pending, 0, "OrmStatus.Pending == 0")
-    runner_assert_eq(r, pkg::OrmStatus.Active, 1, "OrmStatus.Active == 1")
-    runner_assert_eq(r, pkg::OrmStatus.Archived, 2, "OrmStatus.Archived == 2")
-    runner_assert_eq(r, pkg::OrmStatus.Error, 3, "OrmStatus.Error == 3")
-
-    runner_assert_eq(r, pkg::OrmPriority.Low, 0, "OrmPriority.Low == 0")
-    runner_assert_eq(r, pkg::OrmPriority.Normal, 1, "OrmPriority.Normal == 1")
-    runner_assert_eq(r, pkg::OrmPriority.High, 2, "OrmPriority.High == 2")
-    runner_assert_eq(r, pkg::OrmPriority.Critical, 3, "OrmPriority.Critical == 3")
-
-    runner_assert_eq(r, pkg::OrmStyle.Standard, 0, "OrmStyle.Standard == 0")
-    runner_assert_eq(r, pkg::OrmStyle.Formal, 1, "OrmStyle.Formal == 1")
-    runner_assert_eq(r, pkg::OrmStyle.Casual, 2, "OrmStyle.Casual == 2")
-
-    # ═══════════════════════════════════════════════════════════
-    # 3. Struct Models & Factory Constructors
-    # ═══════════════════════════════════════════════════════════
-    let cfg = pkg::new_config("Community", 5, pkg::OrmPriority.High, pkg::OrmStyle.Formal)
-    runner_assert_str_eq(r, cfg.name, "Community", "cfg.name is initialized correctly")
-    runner_assert_eq(r, cfg.count, 5, "cfg.count is initialized correctly")
-    runner_assert_eq(r, cfg.priority, 2, "cfg.priority is initialized to High (2)")
-    runner_assert_eq(r, cfg.style, 1, "cfg.style is initialized to Formal (1)")
-    runner_assert_eq(r, cfg.enabled, 1, "cfg.enabled defaults to 1")
-
-    let full_cfg = pkg::make_config("Full", 10, pkg::OrmPriority.Critical, pkg::OrmStyle.Casual, 0, ["tag1", "tag2"])
-    runner_assert_str_eq(r, full_cfg.name, "Full", "full_cfg.name is correct")
-    runner_assert_eq(r, full_cfg.count, 10, "full_cfg.count is correct")
-    runner_assert_eq(r, full_cfg.priority, 3, "full_cfg.priority is Critical (3)")
-    runner_assert_eq(r, full_cfg.enabled, 0, "full_cfg.enabled is 0")
-    runner_assert_eq(r, len(full_cfg.tags), 2, "full_cfg.tags has 2 elements")
+    let empty_model = 0
+    try
+        pkg::define_model("empty", [])
+    catch err
+        empty_model = err.code
+    end
+    runner_assert_eq(r, empty_model, 2, "empty model throws code 2")
 
     # ═══════════════════════════════════════════════════════════
-    # 4. Struct Methods & Immutability
+    # 2. DDL generation (pure, no driver)
     # ═══════════════════════════════════════════════════════════
-    let summ = cfg.summary()
-    runner_assert_str_eq(r, summ, "Community (count: 5, active)", "cfg.summary() returns expected formatted summary")
-
-    let desc = cfg.describe()
-    runner_assert_true(r, len(desc) > 0, "cfg.describe() returns non-empty description")
-
-    runner_assert_eq(r, cfg.is_valid(), true, "cfg.is_valid() returns 1 for valid configuration")
-    runner_assert_eq(r, cfg.is_enabled(), 1, "cfg.is_enabled() returns 1")
-
-    let updated_name_cfg = cfg.with_name("Contributors")
-    runner_assert_str_eq(r, updated_name_cfg.name, "Contributors", "with_name updates name")
-    runner_assert_str_eq(r, cfg.name, "Community", "original cfg.name remains immutable")
-
-    let updated_prio_cfg = cfg.with_priority(pkg::OrmPriority.Critical)
-    runner_assert_eq(r, updated_prio_cfg.priority, 3, "with_priority updates priority")
-    runner_assert_eq(r, cfg.priority, 2, "original cfg.priority remains unchanged")
+    runner_assert_str_eq(r, pkg::create_table_sql(users), "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, score REAL, payload BLOB, note TEXT);", "DDL renders fully")
 
     # ═══════════════════════════════════════════════════════════
-    # 5. Result Container & Methods
+    # 3. Real roundtrip over db + sqlite adapter (in-memory)
     # ═══════════════════════════════════════════════════════════
-    let ok_res = pkg::ok_result(42, "Computed successfully")
-    runner_assert_eq(r, ok_res.is_ok(), true, "ok_res.is_ok() == 1")
-    runner_assert_eq(r, ok_res.is_error(), false, "ok_res.is_error() == 0")
-    runner_assert_str_eq(r, ok_res.unwrap_or("fallback"), "Computed successfully", "ok_res unwrap_or returns message")
+    let conn = db::open(db::sqlite_driver(), ":memory:")
+    runner_assert_eq(r, pkg::create_table(conn, users), 0, "create_table succeeds")
 
-    let err_res = pkg::error_result("Failed operation", ["Invalid input", "Timeout"])
-    runner_assert_eq(r, err_res.is_ok(), false, "err_res.is_ok() == 0")
-    runner_assert_eq(r, err_res.is_error(), true, "err_res.is_error() == 1")
-    runner_assert_str_eq(r, err_res.unwrap_or("fallback"), "fallback", "err_res unwrap_or returns fallback")
-    runner_assert_eq(r, len(err_res.errors), 2, "err_res contains 2 error details")
+    let big = 1099511627776
+    runner_assert_eq(r, pkg::insert(conn, users, user_row(big, "O'Brien", "19.99", [9, 8, 7], null)), 1, "insert affects 1 row")
 
-    # ═══════════════════════════════════════════════════════════
-    # 6. Statistics Container & Methods
-    # ═══════════════════════════════════════════════════════════
-    let stats = pkg::make_stats(20, 18, 2, 0)
-    runner_assert_eq(r, stats.total, 20, "stats.total == 20")
-    runner_assert_eq(r, stats.passed, 18, "stats.passed == 18")
-    runner_assert_eq(r, stats.failed, 2, "stats.failed == 2")
-    runner_assert_eq(r, stats.total_checked(), 20, "stats.total_checked() == 20")
-    runner_assert_str_eq(r, stats.success_rate(), "90%", "stats.success_rate() == 90%")
+    let got = pkg::find_by_id(conn, users, big)
+    runner_assert_true(r, got is not null, "find_by_id returns row")
+    runner_assert_eq(r, got["id"], big, "int64 pk roundtrips")
+    runner_assert_str_eq(r, got["name"], "O'Brien", "quoted text roundtrips")
+    runner_assert_str_eq(r, str(got["score"]), "19.99", "float-as-text roundtrips")
+    runner_assert_true(r, got["note"] is null, "null stays null")
+    runner_assert_eq(r, len(got["payload"]), 3, "blob roundtrips")
 
-    # ═══════════════════════════════════════════════════════════
-    # 7. Duck Typing Polymorphism (Interfaces)
-    # ═══════════════════════════════════════════════════════════
-    let is_summ = cfg is pkg::Summarizable
-    runner_assert_true(r, is_summ, "cfg satisfies Summarizable interface implicitly")
-    let iface_summ = pkg::format_summary(cfg)
-    runner_assert_str_eq(r, iface_summ, "Community (count: 5, active)", "format_summary dispatches via Summarizable")
+    runner_assert_true(r, pkg::find_by_id(conn, users, 999999) is null, "find_by_id on missing returns null")
 
-    let is_desc = cfg is pkg::Describable
-    runner_assert_true(r, is_desc, "cfg satisfies Describable interface implicitly")
-    let iface_desc = pkg::format_description(cfg)
-    runner_assert_true(r, len(iface_desc) > 0, "format_description dispatches via Describable")
+    runner_assert_eq(r, pkg::insert(conn, users, user_row(2, "Bob", "88.0", [], "x")), 1, "second insert succeeds")
 
-    # Struct that does not implement Summarizable
-    let is_stats_summ = stats is pkg::Summarizable
-    runner_assert_false(r, is_stats_summ, "stats does not satisfy Summarizable interface")
+    let all = pkg::find_all(conn, users, "id", "ASC")
+    runner_assert_eq(r, len(all), 2, "find_all returns 2 rows")
+
+    let lim = pkg::find_all(conn, users, "id", "ASC", 1)
+    runner_assert_eq(r, len(lim), 1, "find_all honors limit")
+
+    let w = pkg::where(conn, users, { "name": "Bob" })
+    runner_assert_eq(r, len(w), 1, "where filters by text")
+
+    runner_assert_eq(r, pkg::count(conn, users, null), 2, "count totals 2")
+    runner_assert_eq(r, pkg::count(conn, users, { "name": "Bob" }), 1, "count filters")
 
     # ═══════════════════════════════════════════════════════════
-    # 8. Workflow Processing & Batching
+    # 4. Update, delete, drop (verified by re-reads)
     # ═══════════════════════════════════════════════════════════
-    let proc_res = pkg::process("Alice", 3, pkg::OrmPriority.High)
-    runner_assert_eq(r, proc_res.is_ok(), 1, "pkg::process returns successful result")
-    runner_assert_str_eq(r, proc_res.message, "OK", "pkg::process message is OK")
+    runner_assert_eq(r, pkg::update(conn, users, { "name": "Bobby" }, { "id": 2 }), 1, "update affects 1 row")
+    let upd = pkg::find_by_id(conn, users, 2)
+    runner_assert_str_eq(r, upd["name"], "Bobby", "update persists")
 
-    let batch_in = ["Alpha", "Beta", "Gamma"]
-    let batch_out = pkg::process_batch(batch_in)
-    runner_assert_eq(r, len(batch_out), 3, "process_batch returns 3 formatted records")
+    runner_assert_eq(r, pkg::delete_by_id(conn, users, 2), 1, "delete_by_id affects 1 row")
+    runner_assert_true(r, pkg::find_by_id(conn, users, 2) is null, "deleted row is gone")
+    runner_assert_eq(r, pkg::delete_where(conn, users, { "name": "O'Brien" }), 1, "delete_where affects 1 row")
+    runner_assert_eq(r, pkg::count(conn, users, null), 0, "table is empty")
 
-    let null_batch = pkg::process_batch(null)
-    runner_assert_eq(r, len(null_batch), 0, "process_batch(null) returns empty array")
+    let no_wipe = 0
+    try
+        pkg::delete_where(conn, users, null)
+    catch err
+        no_wipe = err.code
+    end
+    runner_assert_eq(r, no_wipe, 2, "unconditional delete throws code 2")
 
-    # ═══════════════════════════════════════════════════════════
-    # 9. Control Flow & Pattern Matching Utilities
-    # ═══════════════════════════════════════════════════════════
-    runner_assert_eq(r, pkg::clamp(50, 0, 100), 50, "clamp within bounds")
-    runner_assert_eq(r, pkg::clamp(-10, 0, 100), 0, "clamp lower bound")
-    runner_assert_eq(r, pkg::clamp(150, 0, 100), 100, "clamp upper bound")
-
-    runner_assert_str_eq(r, pkg::pluralize(1, "record", "records"), "record", "pluralize 1 gives singular")
-    runner_assert_str_eq(r, pkg::pluralize(0, "record", "records"), "records", "pluralize 0 gives plural")
-    runner_assert_str_eq(r, pkg::pluralize(5, "record", "records"), "records", "pluralize 5 gives plural")
-
-    let repeated = pkg::repeat_string("item", 3)
-    runner_assert_eq(r, len(repeated), 3, "repeat_string produces 3 elements")
-    runner_assert_str_eq(r, repeated[0], "item", "repeated element matches input")
-
-    # ═══════════════════════════════════════════════════════════
-    # 10. Destructuring: Tuples & Maps
-    # ═══════════════════════════════════════════════════════════
-    let (t_prefix, t_count) = ("Custom", 42)
-    runner_assert_str_eq(r, t_prefix, "Custom", "tuple destructuring binds string")
-    runner_assert_eq(r, t_count, 42, "tuple destructuring binds integer")
-
-    let pkg_info = { "name": f"orm", "version": "0.1.0" }
-    let { name: info_name, version: info_ver } = pkg_info
-    runner_assert_str_eq(r, info_name, f"orm", "map destructuring extracts key name")
-    runner_assert_str_eq(r, info_ver, "0.1.0", "map destructuring extracts key version")
+    let no_empty = 0
+    try
+        pkg::update(conn, users, map(), { "id": 1 })
+    catch err
+        no_empty = err.code
+    end
+    runner_assert_eq(r, no_empty, 2, "empty update throws code 2")
 
     # ═══════════════════════════════════════════════════════════
-    # 11. Feature-Gated API (`extras`, default-on)
+    # 5. Transactions (real rollback through db facade)
     # ═══════════════════════════════════════════════════════════
-    @cfg(feature = "extras")
-    let extra_res = pkg::extra_greeting("Alya")
-    @cfg(feature = "extras")
-    runner_assert_str_eq(r, extra_res, "Howdy, Alya!", "pkg::extra_greeting returns extras greeting")
+    db::begin(conn)
+    pkg::insert(conn, users, user_row(3, "Carol", "70.0", [], null))
+    db::rollback(conn)
+    runner_assert_eq(r, pkg::count(conn, users, null), 0, "rollback undoes insert")
+    db::begin(conn)
+    pkg::insert(conn, users, user_row(3, "Carol", "70.0", [], null))
+    db::commit(conn)
+    runner_assert_eq(r, pkg::count(conn, users, null), 1, "commit persists insert")
+
+    # ═══════════════════════════════════════════════════════════
+    # 6. Engine errors arrive normalized as DbError
+    # ═══════════════════════════════════════════════════════════
+    let badcode = 0
+    try
+        db::execute(conn, "SELECT * FROM no_such_table;", [])
+    catch err
+        badcode = err.code
+    end
+    runner_assert_eq(r, badcode, 1, "engine error arrives as DbError code 1")
+
+    # ═══════════════════════════════════════════════════════════
+    # 7. Strictness: mistyped and missing values throw, never corrupt
+    # ═══════════════════════════════════════════════════════════
+    let miss_map = map()
+    miss_map["id"] = 4
+    miss_map["name"] = "Dan"
+    let miss_val = 0
+    try
+        pkg::insert(conn, users, miss_map)
+    catch err
+        miss_val = err.code
+    end
+    runner_assert_eq(r, miss_val, 2, "missing value throws code 2")
+
+    let wrong_map = map()
+    wrong_map["id"] = "four"
+    wrong_map["name"] = "Dan"
+    wrong_map["score"] = "60.0"
+    wrong_map["payload"] = []
+    wrong_map["note"] = null
+    let wrong_type = 0
+    try
+        pkg::insert(conn, users, wrong_map)
+    catch err
+        wrong_type = err.code
+    end
+    runner_assert_eq(r, wrong_type, 2, "text-for-int throws code 2")
+
+    # NOTE: float dynamics cannot be routed (indistinguishable from ints
+    # at runtime), so there is no throw to assert here: float columns take
+    # round-trip text, covered by the "95.5" inserts above.
+
+    let bad_cond = 0
+    try
+        pkg::where(conn, users, { "hacker": 1 })
+    catch err
+        bad_cond = err.code
+    end
+    runner_assert_eq(r, bad_cond, 2, "unknown cond column throws code 2")
+
+    let bad_order = 0
+    try
+        pkg::where(conn, users, null, "hacker")
+    catch err
+        bad_order = err.code
+    end
+    runner_assert_eq(r, bad_order, 2, "hostile order column throws code 2")
+
+    let bad_dir = 0
+    try
+        pkg::where(conn, users, null, "id", "SIDEWAYS")
+    catch err
+        bad_dir = err.code
+    end
+    runner_assert_eq(r, bad_dir, 2, "bad direction throws code 2")
+
+    let no_pk = 0
+    try
+        pkg::find_by_id(conn, make_counters_model(), 1)
+    catch err
+        no_pk = err.code
+    end
+    runner_assert_eq(r, no_pk, 2, "find_by_id without pk throws code 2")
+
+    # ═══════════════════════════════════════════════════════════
+    # 8. ModelDef method forms
+    # ═══════════════════════════════════════════════════════════
+    # DDL returns the engine's stale change counter (SQLite does not reset
+    # it for DDL), so these are effect-only calls proven by the ops below.
+    users.drop_table_m(conn)
+    users.create_table_m(conn)
+    runner_assert_eq(r, users.insert_m(conn, user_row(5, "Erin", "55.5", [], null)), 1, "ModelDef.insert affects 1 row")
+    runner_assert_eq(r, len(users.find_all_m(conn)), 1, "ModelDef.find_all returns 1 row")
+    runner_assert_eq(r, users.count_m(conn, null), 1, "ModelDef.count returns 1")
+    runner_assert_eq(r, users.update_m(conn, { "name": "Erin2" }, { "id": 5 }), 1, "ModelDef.update affects 1 row")
+    runner_assert_eq(r, users.delete_where_m(conn, { "id": 5 }), 1, "ModelDef.delete_where affects 1 row")
+    users.drop_table_m(conn)
+    db::close(conn)
 
     let failed = runner_summary(r)
     if failed > 0
