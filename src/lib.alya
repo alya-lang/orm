@@ -88,7 +88,7 @@ end
 
 # Builds " WHERE k = ? AND ..." plus the param array. Null `cond` means
 # no filter. Unknown keys throw (injection-proof by construction).
-function where_parts(model: ModelDef, cond)
+function where_parts(model: ModelDef, cond) -> WhereClause
     let sql = ""
     let params = []
     if cond is null
