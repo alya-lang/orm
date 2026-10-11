@@ -235,14 +235,14 @@ function main()
     # ═══════════════════════════════════════════════════════════
     # DDL returns the engine's stale change counter (SQLite does not reset
     # it for DDL), so these are effect-only calls proven by the ops below.
-    users.drop_table_m(conn)
-    users.create_table_m(conn)
-    runner_assert_eq(r, users.insert_m(conn, user_row(5, "Erin", "55.5", [], null)), 1, "ModelDef.insert affects 1 row")
-    runner_assert_eq(r, len(users.find_all_m(conn)), 1, "ModelDef.find_all returns 1 row")
-    runner_assert_eq(r, users.count_m(conn, null), 1, "ModelDef.count returns 1")
-    runner_assert_eq(r, users.update_m(conn, { "name": "Erin2" }, { "id": 5 }), 1, "ModelDef.update affects 1 row")
-    runner_assert_eq(r, users.delete_where_m(conn, { "id": 5 }), 1, "ModelDef.delete_where affects 1 row")
-    users.drop_table_m(conn)
+    users.drop_table(conn)
+    users.create_table(conn)
+    runner_assert_eq(r, users.insert(conn, user_row(5, "Erin", "55.5", [], null)), 1, "ModelDef.insert affects 1 row")
+    runner_assert_eq(r, len(users.find_all(conn)), 1, "ModelDef.find_all returns 1 row")
+    runner_assert_eq(r, users.count(conn, null), 1, "ModelDef.count returns 1")
+    runner_assert_eq(r, users.update(conn, { "name": "Erin2" }, { "id": 5 }), 1, "ModelDef.update affects 1 row")
+    runner_assert_eq(r, users.delete_where(conn, { "id": 5 }), 1, "ModelDef.delete_where affects 1 row")
+    users.drop_table(conn)
     db::close(conn)
 
     let failed = runner_summary(r)

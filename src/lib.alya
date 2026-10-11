@@ -388,7 +388,7 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
-pub function ModelDef.create_table_m(self: ModelDef, conn) -> int
+pub function ModelDef.create_table(self: ModelDef, conn) -> int
     return create_table(conn, self)
 end
 
@@ -400,7 +400,7 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
-pub function ModelDef.drop_table_m(self: ModelDef, conn) -> int
+pub function ModelDef.drop_table(self: ModelDef, conn) -> int
     return drop_table(conn, self)
 end
 
@@ -413,7 +413,7 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
-pub function ModelDef.insert_m(self: ModelDef, conn, values) -> int
+pub function ModelDef.insert(self: ModelDef, conn, values) -> int
     return insert(conn, self, values)
 end
 
@@ -427,7 +427,7 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
-pub function ModelDef.update_m(self: ModelDef, conn, values, cond = null) -> int
+pub function ModelDef.update(self: ModelDef, conn, values, cond = null) -> int
     return update(conn, self, values, cond)
 end
 
@@ -440,7 +440,7 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
-pub function ModelDef.delete_where_m(self: ModelDef, conn, cond) -> int
+pub function ModelDef.delete_where(self: ModelDef, conn, cond) -> int
     return delete_where(conn, self, cond)
 end
 
@@ -452,7 +452,7 @@ end
 ##
 ## ### Returns
 ## Array of row maps (possibly empty).
-pub function ModelDef.find_all_m(self: ModelDef, conn) -> array
+pub function ModelDef.find_all(self: ModelDef, conn) -> array
     return find_all(conn, self)
 end
 
@@ -465,7 +465,7 @@ end
 ##
 ## ### Returns
 ## Array of row maps (possibly empty).
-pub function ModelDef.where_m(self: ModelDef, conn, cond = null) -> array
+pub function ModelDef.where(self: ModelDef, conn, cond = null) -> array
     return where(conn, self, cond)
 end
 
@@ -478,6 +478,6 @@ end
 ##
 ## ### Returns
 ## Matching row count integer.
-pub function ModelDef.count_m(self: ModelDef, conn, cond = null) -> int
+pub function ModelDef.count(self: ModelDef, conn, cond = null) -> int
     return count(conn, self, cond)
 end
