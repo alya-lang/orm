@@ -24,13 +24,17 @@ pub const KIND_BLOB = 5
 
 ## A single mapped column.
 ##
+## Field names are ecosystem-unique (`colkind`, `colname`): same-named
+## fields at different struct indices misresolve on untyped reads, so
+## shared names like `kind`/`name` are deliberately avoided here.
+##
 ## ### Fields
-## - `name`: Column name string.
-## - `kind`: One of `KIND_INT`, `KIND_FLOAT`, `KIND_TEXT`, `KIND_BLOB`.
+## - `colname`: Column name string.
+## - `colkind`: One of `KIND_INT`, `KIND_FLOAT`, `KIND_TEXT`, `KIND_BLOB`.
 ## - `pk`: `1` for `INTEGER PRIMARY KEY` (requires kind `KIND_INT`), else `0`.
 pub struct FieldDef
-    name: string
-    kind: int
+    colname: string
+    colkind: int
     pk: int
 end
 
@@ -60,7 +64,7 @@ pub function field(name: string, kind: int, pk: int = 0) -> FieldDef
     if pk == true and kind != 1
         throw db::db_error(2, "orm: primary key column '" + name + "' must be INTEGER")
     end
-    return FieldDef { name: name, kind: kind, pk: pk }
+    return FieldDef { colname: name, colkind: kind, pk: pk }
 end
 
 ## Creates a table model from ordered column definitions.
@@ -113,8 +117,8 @@ end
 
 ## Reads a field's column name through a statically-typed boundary.
 ##
-## Untyped `.name` reads are ambiguous across packages (`Driver`,
-## `FieldDef`); this helper pins the `FieldDef` layout.
+## Exists so every `.colname` read in this package goes through one
+## pinned layout (belt and suspenders: the name is already unique).
 ##
 ## ### Parameters
 ## - `f`: Target `FieldDef`.
@@ -122,14 +126,13 @@ end
 ## ### Returns
 ## The column name string.
 pub function field_name(f: FieldDef) -> string
-    return f.name
+    return f.colname
 end
 
 ## Reads a field's column kind through a statically-typed boundary.
 ##
-## Untyped `.kind` reads are ambiguous across packages (`DbParam`,
-## `Param`, `FieldDef` disagree on the index); this helper pins the
-## `FieldDef` layout.
+## Exists so every `.colkind` read in this package goes through one
+## pinned layout (belt and suspenders: the name is already unique).
 ##
 ## ### Parameters
 ## - `f`: Target `FieldDef`.
@@ -137,5 +140,5 @@ end
 ## ### Returns
 ## The column kind integer.
 pub function field_kind(f: FieldDef) -> int
-    return f.kind
+    return f.colkind
 end

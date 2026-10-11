@@ -11,7 +11,7 @@ repository = "https://github.com/alya-lang/orm"
 keywords = ["alya", "alya-lang", "package", "orm", "database", "sql", "model", "query", "schema"]
 
 [dependencies]
-db = { git = "https://github.com/alya-lang/db", tag = "v0.2.0" }
+db = { git = "https://github.com/alya-lang/db", tag = "v0.2.1" }
 
 # Optional: feature-gated API slices. v0.1.0 ships the ungated core only.
 [features]

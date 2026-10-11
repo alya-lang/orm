@@ -30,9 +30,8 @@ function main()
     bench_stop(runner, "create_table_sql 50k builds")
 
     # Bench 2: row-map construction (no driver) — 50k iterations.
-    # DB writes stay in the test suite: tight insert loops in this runner
-    # context abort on current compilers (see suite log), while identical
-    # single inserts pass. Not a benchmark concern.
+    # DB writes stay in the test suite by design (correctness belongs
+    # there); benchmarks measure pure build paths only.
     bench_start(runner, 50000)
     let j = 0
     while j < 50000

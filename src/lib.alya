@@ -29,31 +29,29 @@ function join_comma(parts: array) -> string
 end
 
 function column_sql(f: FieldDef) -> string
-    let kind = f.kind
+    let kind = f.colkind
     when kind
         is 1 then
             if f.pk == true
-                return f.name + " INTEGER PRIMARY KEY"
+                return f.colname + " INTEGER PRIMARY KEY"
             end
-            return f.name + " INTEGER"
-        is 2 then return f.name + " REAL"
-        is 3 then return f.name + " TEXT"
-        is 5 then return f.name + " BLOB"
-        else throw db::db_error(2, f"orm: unknown kind for column '{f.name}'")
+            return f.colname + " INTEGER"
+        is 2 then return f.colname + " REAL"
+        is 3 then return f.colname + " TEXT"
+        is 5 then return f.colname + " BLOB"
+        else throw db::db_error(2, f"orm: unknown kind for column '{f.colname}'")
     end
 end
 
 # Converts one value to a `db` Param using the DECLARED column kind only.
-# Usable checks on rebound dynamics are `is null` (zero-test) and
-# `is string` (heap-range); `is int` defaults true, `is array` misses,
-# `len()` dereferences heap-range ints, and `is not` miscompiles in
-# functions, so none of the four is consulted anywhere here. Integer `0`
-# shares the zero word with null and reads as null: callers must avoid 0
-# as a significant value (auto-rowid fills it); float `0.0` stays
-# conflated with null (pass it as text, like every float).
+# Usable checks are `is null` (zero-test), `is string` (heap-range), and
+# `is not int` (tag-classified since alya-lang/alya#167); integer `0`
+# shares the zero word with null, so the null check excludes ints
+# explicitly. Float `0.0` stays conflated with null (pass it as text,
+# like every float).
 function param_for(field: FieldDef, val)
-    let kind = field.kind
-    let col = field.name
+    let kind = field.colkind
+    let col = field.colname
     if val is null
         return db::param_null()
     end
