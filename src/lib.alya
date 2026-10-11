@@ -44,14 +44,13 @@ function column_sql(f: FieldDef) -> string
 end
 
 # Converts one value to a `db` Param using the DECLARED column kind only.
-# Null and integer `0` are distinct as literals and inline map reads
-# (tagged KIND_NULL, alya-lang/alya#168), but the tag does NOT survive
-# every transport: a map-read `0` passed as a function argument checks
-# `is null` (and a let-bound map-read/function-return null checks
-# non-null). This function receives its value as an argument, so callers
-# must avoid `0` as a significant value — use auto-rowid or start ids
-# at 1. `is string` stays heap-range. Float `0.0` travels as round-trip
-# text, like every float.
+# Null and integer `0` are distinct on every transport since
+# alya-lang/alya#170 (tagged KIND_NULL, alya-lang/alya#168), so `is null`
+# here is sound. One remaining ban: `0` as a significant value is still
+# off limits because `sqlite` row decode tags a stored `0` as null on
+# read-back — use auto-rowid or start ids at 1 until that is fixed.
+# `is string` stays heap-range. Float `0.0` travels as round-trip text,
+# like every float.
 function param_for(field: FieldDef, val)
     let kind = field.colkind
     let col = field.colname
@@ -75,9 +74,9 @@ function param_for(field: FieldDef, val)
 end
 
 function model_param(model: ModelDef, col: string, val)
-    # Null guard runs inline on the call: null returned from a
-    # dynamically-typed function loses its tag when let-bound (compiler
-    # follow-up to alya-lang/alya#168), so the value is re-fetched below.
+    # Null guard runs inline on the call (kept from the alya-lang/alya#170
+    # era, when let-bound dynamic nulls demoted; harmless and compatible
+    # with older toolchains), so the value is re-fetched below.
     if find_field(model, col) is null
         throw db::db_error(2, f"orm: unknown column '{col}'")
     end
@@ -103,8 +102,8 @@ function where_parts(model: ModelDef, cond) -> WhereClause
     let ks = keys(cond)
     let first = true
     for k in ks
-        # Inline null guard (see model_param): let-binding a dynamic
-        # null return demotes it to int 0 on current compilers.
+        # Inline null guard (see model_param): kept as a compatible guard
+        # from the alya-lang/alya#170 era.
         if find_field(model, k) is null
             throw db::db_error(2, f"orm: unknown column '{k}'")
         end
@@ -231,8 +230,8 @@ pub function update(conn, model: ModelDef, values, cond = null) -> int
     let params = []
     let vks = keys(values)
     for k in vks
-        # Inline null guard (see model_param): let-binding a dynamic
-        # null return demotes it to int 0 on current compilers.
+        # Inline null guard (see model_param): kept as a compatible guard
+        # from the alya-lang/alya#170 era.
         if find_field(model, k) is null
             throw db::db_error(2, f"orm: unknown column '{k}'")
         end
@@ -285,8 +284,8 @@ end
 ## ### Returns
 ## Affected row count integer.
 pub function delete_by_id(conn, model: ModelDef, id) -> int
-    # Inline null guard (see model_param): let-binding a dynamic
-    # null return demotes it to int 0 on current compilers.
+    # Inline null guard (see model_param): kept as a compatible guard
+    # from the alya-lang/alya#170 era.
     if pk_field(model) is null
         throw db::db_error(2, f"orm: model '{model.table}' has no primary key")
     end
@@ -359,8 +358,8 @@ end
 ## ### Returns
 ## The row map, or null.
 pub function find_by_id(conn, model: ModelDef, id)
-    # Inline null guard (see model_param): let-binding a dynamic
-    # null return demotes it to int 0 on current compilers.
+    # Inline null guard (see model_param): kept as a compatible guard
+    # from the alya-lang/alya#170 era.
     if pk_field(model) is null
         throw db::db_error(2, f"orm: model '{model.table}' has no primary key")
     end
