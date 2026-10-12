@@ -57,6 +57,26 @@ alya add orm --git https://github.com/alya-lang/orm --branch main
 alya install
 ```
 
+### Package Features
+
+| Feature | Default | Description |
+|:---|:---:|:---|
+| `schema` | ✅ | DDL generation and table lifecycle (`create_table_sql`, `create_table`, `drop_table`). |
+| `write` | ✅ | Row writes (`insert`, `update`, `delete_where`, `delete_by_id`). |
+| `query` | ✅ | Row reads (`find_all`, `where`, `find_by_id`, `count`). |
+
+Model definitions (`define_model`, `field`, kinds) always work.
+
+```bash
+# Full build (default)
+alya install
+alya test
+
+# Slim build (model definitions only)
+alya install --no-default-features
+alya test --no-default-features
+```
+
 ---
 
 ## 🚀 Quick Start

@@ -27,10 +27,7 @@ function user_row(id: int, name: string, score: string, payload, note)
     return m
 end
 
-function main()
-    test_suite("orm Test Suite")
-    let r = runner_new()
-
+function test_model(r)
     # ═══════════════════════════════════════════════════════════
     # 1. Model definition & validation (pure, no driver)
     # ═══════════════════════════════════════════════════════════
@@ -70,12 +67,27 @@ function main()
         empty_model = err.code
     end
     runner_assert_eq(r, empty_model, 2, "empty model throws code 2")
+end
 
+@cfg(feature = "schema")
+function test_schema(r)
+    let users = make_users_model()
     # ═══════════════════════════════════════════════════════════
     # 2. DDL generation (pure, no driver)
     # ═══════════════════════════════════════════════════════════
     runner_assert_str_eq(r, pkg::create_table_sql(users), "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, score REAL, payload BLOB, note TEXT);", "DDL renders fully")
+end
 
+@cfg(not(feature = "schema"))
+function test_schema(r)
+end
+
+@cfg(feature = "schema")
+@cfg(feature = "write")
+@cfg(feature = "query")
+function test_crud(r)
+    let users = make_users_model()
+    let conn = db::open(db::sqlite_driver(), ":memory:")
     # ═══════════════════════════════════════════════════════════
     # 3. Real roundtrip over db + sqlite adapter (in-memory)
     # ═══════════════════════════════════════════════════════════
@@ -114,7 +126,6 @@ function main()
 
     runner_assert_eq(r, pkg::count(conn, users, null), 2, "count totals 2")
     runner_assert_eq(r, pkg::count(conn, users, { "name": "Bob" }), 1, "count filters")
-
     # ═══════════════════════════════════════════════════════════
     # 4. Update, delete, drop (verified by re-reads)
     # ═══════════════════════════════════════════════════════════
@@ -142,7 +153,6 @@ function main()
         no_empty = err.code
     end
     runner_assert_eq(r, no_empty, 2, "empty update throws code 2")
-
     # ═══════════════════════════════════════════════════════════
     # 5. Transactions (real rollback through db facade)
     # ═══════════════════════════════════════════════════════════
@@ -154,7 +164,6 @@ function main()
     pkg::insert(conn, users, user_row(3, "Carol", "70.0", [], null))
     db::commit(conn)
     runner_assert_eq(r, pkg::count(conn, users, null), 1, "commit persists insert")
-
     # ═══════════════════════════════════════════════════════════
     # 6. Engine errors arrive normalized as DbError
     # ═══════════════════════════════════════════════════════════
@@ -165,7 +174,6 @@ function main()
         badcode = err.code
     end
     runner_assert_eq(r, badcode, 1, "engine error arrives as DbError code 1")
-
     # ═══════════════════════════════════════════════════════════
     # 7. Strictness: mistyped and missing values throw, never corrupt
     # ═══════════════════════════════════════════════════════════
@@ -229,7 +237,6 @@ function main()
         no_pk = err.code
     end
     runner_assert_eq(r, no_pk, 2, "find_by_id without pk throws code 2")
-
     # ═══════════════════════════════════════════════════════════
     # 8. ModelDef method forms
     # ═══════════════════════════════════════════════════════════
@@ -244,6 +251,19 @@ function main()
     runner_assert_eq(r, users.delete_where(conn, { "id": 5 }), 1, "ModelDef.delete_where affects 1 row")
     users.drop_table(conn)
     db::close(conn)
+end
+
+@cfg(any(not(feature = "schema"), not(feature = "write"), not(feature = "query")))
+function test_crud(r)
+end
+
+function main()
+    test_suite("orm Test Suite")
+    let r = runner_new()
+
+    test_model(r)
+    test_schema(r)
+    test_crud(r)
 
     let failed = runner_summary(r)
     if failed > 0

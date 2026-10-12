@@ -16,19 +16,7 @@ function bench_row(i: int)
     return m
 end
 
-function main()
-    let runner = bench_runner("orm Micro-Benchmarks")
-    let users = bench_users_model()
-
-    # Bench 1: DDL generation (pure, no driver) — 50k iterations
-    bench_start(runner, 50000)
-    let i = 0
-    while i < 50000
-        pkg::create_table_sql(users)
-        i += 1
-    end
-    bench_stop(runner, "create_table_sql 50k builds")
-
+function bench_core(runner)
     # Bench 2: row-map construction (no driver) — 50k iterations.
     # DB writes stay in the test suite by design (correctness belongs
     # there); benchmarks measure pure build paths only.
@@ -39,6 +27,30 @@ function main()
         j += 1
     end
     bench_stop(runner, "row-map build 50k rows")
+end
+
+@cfg(feature = "schema")
+function bench_schema(runner)
+    let users = bench_users_model()
+    # Bench 1: DDL generation (pure, no driver) — 50k iterations
+    bench_start(runner, 50000)
+    let i = 0
+    while i < 50000
+        pkg::create_table_sql(users)
+        i += 1
+    end
+    bench_stop(runner, "create_table_sql 50k builds")
+end
+
+@cfg(not(feature = "schema"))
+function bench_schema(runner)
+end
+
+function main()
+    let runner = bench_runner("orm Micro-Benchmarks")
+
+    bench_core(runner)
+    bench_schema(runner)
 
     bench_summary(runner)
 end

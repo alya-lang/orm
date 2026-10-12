@@ -24,16 +24,11 @@ function user_row(id: int, name: string, score: string, note)
     return m
 end
 
-function main()
-    say "==========================================="
-    say "            ORM PACKAGE SHOWCASE           "
-    say "==========================================="
-
-    # 1. Define the model (kinds mirror db ParamKind values)
-    let users = pkg::define_model("users", [pkg::field("id", pkg::KIND_INT, 1), pkg::field("name", pkg::KIND_TEXT), pkg::field("score", pkg::KIND_FLOAT), pkg::field("note", pkg::KIND_TEXT)])
-    say "1. Model defined: users (id INTEGER PRIMARY KEY, name TEXT, score REAL, note TEXT)"
+@cfg(feature = "schema")
+@cfg(feature = "write")
+@cfg(feature = "query")
+function demo_crud(users)
     say "   DDL: " + pkg::create_table_sql(users)
-
     # 2. Open through db + sqlite adapter, create the table
     let conn = db::open(db::sqlite_driver(), ":memory:")
     pkg::create_table(conn, users)
@@ -73,6 +68,24 @@ function main()
 
     pkg::drop_table(conn, users)
     db::close(conn)
+end
+
+@cfg(any(not(feature = "schema"), not(feature = "write"), not(feature = "query")))
+# alya-lint: disable unused-param
+function demo_crud(users)
+    say "CRUD demo skipped (needs schema, write and query features)"
+end
+# alya-lint: enable unused-param
+
+function main()
+    say "==========================================="
+    say "            ORM PACKAGE SHOWCASE           "
+    say "==========================================="
+
+    # 1. Define the model (kinds mirror db ParamKind values)
+    let users = pkg::define_model("users", [pkg::field("id", pkg::KIND_INT, 1), pkg::field("name", pkg::KIND_TEXT), pkg::field("score", pkg::KIND_FLOAT), pkg::field("note", pkg::KIND_TEXT)])
+    say "1. Model defined: users (id INTEGER PRIMARY KEY, name TEXT, score REAL, note TEXT)"
+    demo_crud(users)
     say "==========================================="
 end
 

@@ -138,12 +138,14 @@ end
 # ───────────────────────────────────────────────────────────────
 
 ## Renders the CREATE TABLE statement for a model (no execution).
+## Requires the `schema` feature (default-on).
 ##
 ## ### Parameters
 ## - `model`: Target `ModelDef`.
 ##
 ## ### Returns
 ## The DDL string (handy for logging and migrations).
+@cfg(feature = "schema")
 pub function create_table_sql(model: ModelDef) -> string
     let parts = []
     for f in model.fields
@@ -153,6 +155,7 @@ pub function create_table_sql(model: ModelDef) -> string
 end
 
 ## Creates the model's table.
+## Requires the `schema` feature (default-on).
 ##
 ## ### Parameters
 ## - `conn`: Target `db` connection (untyped: any driver handle).
@@ -160,11 +163,13 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
+@cfg(feature = "schema")
 pub function create_table(conn, model: ModelDef) -> int
     return db::execute(conn, create_table_sql(model), [])
 end
 
 ## Drops the model's table.
+## Requires the `schema` feature (default-on).
 ##
 ## ### Parameters
 ## - `conn`: Target `db` connection.
@@ -172,6 +177,7 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
+@cfg(feature = "schema")
 pub function drop_table(conn, model: ModelDef) -> int
     return db::execute(conn, "DROP TABLE " + model.table + ";", [])
 end
@@ -181,6 +187,7 @@ end
 # ───────────────────────────────────────────────────────────────
 
 ## Inserts one row; every model column needs a value (null allowed).
+## Requires the `write` feature (default-on).
 ##
 ## Values must arrive in column type: ints for INTEGER, strings for TEXT,
 ## round-trip text for REAL, byte arrays for BLOB, null anywhere. Missing
@@ -198,6 +205,7 @@ end
 ## ```alya
 ## insert(conn, users, { "name": "Alice", "score": "95.5" })
 ## ```
+@cfg(feature = "write")
 pub function insert(conn, model, values) -> int
     let cols = []
     let holders = []
@@ -216,6 +224,7 @@ pub function insert(conn, model, values) -> int
 end
 
 ## Updates rows matching `cond` (null `cond` updates every row).
+## Requires the `write` feature (default-on).
 ##
 ## ### Parameters
 ## - `conn`: Target `db` connection.
@@ -225,6 +234,7 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
+@cfg(feature = "write")
 pub function update(conn, model: ModelDef, values, cond = null) -> int
     let sets = []
     let params = []
@@ -255,6 +265,7 @@ pub function update(conn, model: ModelDef, values, cond = null) -> int
 end
 
 ## Deletes rows matching `cond` (null refuses: use `drop_table` to clear).
+## Requires the `write` feature (default-on).
 ##
 ## ### Parameters
 ## - `conn`: Target `db` connection.
@@ -263,6 +274,7 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
+@cfg(feature = "write")
 pub function delete_where(conn, model: ModelDef, cond) -> int
     if cond is null
         throw db::db_error(2, "orm: refusing unconditional delete (use drop_table to clear)")
@@ -275,6 +287,7 @@ pub function delete_where(conn, model: ModelDef, cond) -> int
 end
 
 ## Deletes one row by primary key.
+## Requires the `write` feature (default-on).
 ##
 ## ### Parameters
 ## - `conn`: Target `db` connection.
@@ -283,6 +296,7 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
+@cfg(feature = "write")
 pub function delete_by_id(conn, model: ModelDef, id) -> int
     # Inline null guard (see model_param): kept as a compatible guard
     # from the alya-lang/alya#170 era.
@@ -300,6 +314,7 @@ end
 # ───────────────────────────────────────────────────────────────
 
 ## Returns all rows, optionally ordered and limited.
+## Requires the `query` feature (default-on).
 ##
 ## Rows are column-name maps (see `db::query`); use `db` row helpers or
 ## explicit reads to fill your structs.
@@ -313,6 +328,7 @@ end
 ##
 ## ### Returns
 ## Array of row maps (possibly empty).
+@cfg(feature = "query")
 pub function find_all(conn, model: ModelDef, order: string = "", direction: string = "ASC", limit: int = -1) -> array
     let sql = "SELECT * FROM " + model.table + order_clause(model, order, direction)
     if limit != -1
@@ -325,6 +341,7 @@ pub function find_all(conn, model: ModelDef, order: string = "", direction: stri
 end
 
 ## Returns rows matching `cond` (null `cond` matches all rows).
+## Requires the `query` feature (default-on).
 ##
 ## ### Parameters
 ## - `conn`: Target `db` connection.
@@ -336,6 +353,7 @@ end
 ##
 ## ### Returns
 ## Array of row maps (possibly empty).
+@cfg(feature = "query")
 pub function where(conn, model: ModelDef, cond = null, order: string = "", direction: string = "ASC", limit: int = -1) -> array
     let parts = where_parts(model, cond)
     let sql = "SELECT * FROM " + model.table + parts.sql + order_clause(model, order, direction)
@@ -349,6 +367,7 @@ pub function where(conn, model: ModelDef, cond = null, order: string = "", direc
 end
 
 ## Returns one row by primary key, or null when missing.
+## Requires the `query` feature (default-on).
 ##
 ## ### Parameters
 ## - `conn`: Target `db` connection.
@@ -357,6 +376,7 @@ end
 ##
 ## ### Returns
 ## The row map, or null.
+@cfg(feature = "query")
 pub function find_by_id(conn, model: ModelDef, id)
     # Inline null guard (see model_param): kept as a compatible guard
     # from the alya-lang/alya#170 era.
@@ -374,6 +394,7 @@ pub function find_by_id(conn, model: ModelDef, id)
 end
 
 ## Counts rows matching `cond` (null `cond` counts all rows).
+## Requires the `query` feature (default-on).
 ##
 ## ### Parameters
 ## - `conn`: Target `db` connection.
@@ -382,6 +403,7 @@ end
 ##
 ## ### Returns
 ## Matching row count integer.
+@cfg(feature = "query")
 pub function count(conn, model: ModelDef, cond = null) -> int
     let parts = where_parts(model, cond)
     return db::query_scalar(conn, "SELECT count(*) FROM " + model.table + parts.sql + ";", parts.params)
@@ -392,6 +414,7 @@ end
 # ───────────────────────────────────────────────────────────────
 
 ## Creates this model's table.
+## Requires the `schema` feature (default-on).
 ##
 ## ### Parameters
 ## - `self`: The target `ModelDef`.
@@ -399,11 +422,13 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
+@cfg(feature = "schema")
 pub function ModelDef.create_table(self: ModelDef, conn) -> int
     return create_table(conn, self)
 end
 
 ## Drops this model's table.
+## Requires the `schema` feature (default-on).
 ##
 ## ### Parameters
 ## - `self`: The target `ModelDef`.
@@ -411,11 +436,13 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
+@cfg(feature = "schema")
 pub function ModelDef.drop_table(self: ModelDef, conn) -> int
     return drop_table(conn, self)
 end
 
 ## Inserts one row into this model's table.
+## Requires the `write` feature (default-on).
 ##
 ## ### Parameters
 ## - `self`: The target `ModelDef`.
@@ -424,11 +451,13 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
+@cfg(feature = "write")
 pub function ModelDef.insert(self: ModelDef, conn, values) -> int
     return insert(conn, self, values)
 end
 
 ## Updates rows of this model's table.
+## Requires the `write` feature (default-on).
 ##
 ## ### Parameters
 ## - `self`: The target `ModelDef`.
@@ -438,11 +467,13 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
+@cfg(feature = "write")
 pub function ModelDef.update(self: ModelDef, conn, values, cond = null) -> int
     return update(conn, self, values, cond)
 end
 
 ## Deletes rows of this model's table matching `cond`.
+## Requires the `write` feature (default-on).
 ##
 ## ### Parameters
 ## - `self`: The target `ModelDef`.
@@ -451,11 +482,13 @@ end
 ##
 ## ### Returns
 ## Affected row count integer.
+@cfg(feature = "write")
 pub function ModelDef.delete_where(self: ModelDef, conn, cond) -> int
     return delete_where(conn, self, cond)
 end
 
 ## Returns all rows of this model's table.
+## Requires the `query` feature (default-on).
 ##
 ## ### Parameters
 ## - `self`: The target `ModelDef`.
@@ -463,11 +496,13 @@ end
 ##
 ## ### Returns
 ## Array of row maps (possibly empty).
+@cfg(feature = "query")
 pub function ModelDef.find_all(self: ModelDef, conn) -> array
     return find_all(conn, self)
 end
 
 ## Returns rows of this model's table matching `cond`.
+## Requires the `query` feature (default-on).
 ##
 ## ### Parameters
 ## - `self`: The target `ModelDef`.
@@ -476,11 +511,13 @@ end
 ##
 ## ### Returns
 ## Array of row maps (possibly empty).
+@cfg(feature = "query")
 pub function ModelDef.where(self: ModelDef, conn, cond = null) -> array
     return where(conn, self, cond)
 end
 
 ## Counts rows of this model's table.
+## Requires the `query` feature (default-on).
 ##
 ## ### Parameters
 ## - `self`: The target `ModelDef`.
@@ -489,6 +526,7 @@ end
 ##
 ## ### Returns
 ## Matching row count integer.
+@cfg(feature = "query")
 pub function ModelDef.count(self: ModelDef, conn, cond = null) -> int
     return count(conn, self, cond)
 end

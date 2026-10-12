@@ -13,9 +13,16 @@ keywords = ["alya", "alya-lang", "package", "orm", "database", "sql", "model", "
 [dependencies]
 db = { git = "https://github.com/alya-lang/db", tag = "v0.2.2" }
 
-# Optional: feature-gated API slices. v0.1.0 ships the ungated core only.
+# Optional: feature-gated API slices. Members name another feature;
+# gate the using code with `@cfg(feature = "...")` (see `src/lib.alya`).
+# `default` is active unless the caller passes `--no-default-features`;
+# select features explicitly via
+# `alya build/run/test/bench/install --features <a,b>`.
 [features]
-default = []
+default = ["schema", "write", "query"]
+schema = []
+write = []
+query = []
 
 # [build]
 # c-sources = ["c/source.c"]
